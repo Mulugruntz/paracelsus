@@ -27,10 +27,20 @@ class ColumnSorts(str, Enum):
     preserve = "preserve-order"
 
 
+class Layouts(str, Enum):
+    dagre = "dagre"
+    elk = "elk"
+
+
 if "column_sort" in PYPROJECT_SETTINGS:
     SORT_DEFAULT = ColumnSorts(PYPROJECT_SETTINGS["column_sort"]).value
 else:
     SORT_DEFAULT = ColumnSorts.key_based.value
+
+if "omit_comments" in PYPROJECT_SETTINGS:
+    OMIT_COMMENTS_DEFAULT = PYPROJECT_SETTINGS["omit_comments"]
+else:
+    OMIT_COMMENTS_DEFAULT = False
 
 
 def get_base_class(base_class_path: str | None, settings: Dict[str, Any] | None) -> str:
@@ -82,6 +92,19 @@ def graph(
             help="Specifies the method of sorting columns in diagrams.",
         ),
     ] = SORT_DEFAULT,  # type: ignore # Typer will fail to render the help message, but this code works.
+    omit_comments: Annotated[
+        bool,
+        typer.Option(
+            "--omit-comments",
+            help="Omit SQLAlchemy column comments from the diagram.",
+        ),
+    ] = OMIT_COMMENTS_DEFAULT,
+    layout: Annotated[
+        Optional[Layouts],
+        typer.Option(
+            help="Specifies the layout of the diagram. Only applicable for mermaid format.",
+        ),
+    ] = None,
 ):
     settings = get_pyproject_settings()
     base_class = get_base_class(base_class_path, settings)
@@ -89,17 +112,21 @@ def graph(
     if "imports" in settings:
         import_module.extend(settings["imports"])
 
-    typer.echo(
-        get_graph_string(
-            base_class_path=base_class,
-            import_module=import_module,
-            include_tables=set(include_tables + settings.get("include_tables", [])),
-            exclude_tables=set(exclude_tables + settings.get("exclude_tables", [])),
-            python_dir=python_dir,
-            format=format.value,
-            column_sort=column_sort,
-        )
+    if layout and format != Formats.mermaid:
+        raise ValueError("The `layout` parameter can only be used with the `mermaid` format.")
+
+    graph_string = get_graph_string(
+        base_class_path=base_class,
+        import_module=import_module,
+        include_tables=set(include_tables + settings.get("include_tables", [])),
+        exclude_tables=set(exclude_tables + settings.get("exclude_tables", [])),
+        python_dir=python_dir,
+        format=format.value,
+        column_sort=column_sort,
+        omit_comments=omit_comments,
+        layout=layout.value if layout else None,
     )
+    typer.echo(graph_string, nl=not graph_string.endswith("\n"))
 
 
 @app.command(help="Create a graph and inject it as a code field into a markdown file.")
@@ -166,10 +193,26 @@ def inject(
             help="Specifies the method of sorting columns in diagrams.",
         ),
     ] = SORT_DEFAULT,  # type: ignore # Typer will fail to render the help message, but this code works.
+    omit_comments: Annotated[
+        bool,
+        typer.Option(
+            "--omit-comments",
+            help="Omit SQLAlchemy column comments from the diagram.",
+        ),
+    ] = OMIT_COMMENTS_DEFAULT,
+    layout: Annotated[
+        Optional[Layouts],
+        typer.Option(
+            help="Specifies the layout of the diagram. Only applicable for mermaid format.",
+        ),
+    ] = None,
 ):
     settings = get_pyproject_settings()
     if "imports" in settings:
         import_module.extend(settings["imports"])
+
+    if layout and format != Formats.mermaid:
+        raise ValueError("The `layout` parameter can only be used with the `mermaid` format.")
 
     # Generate Graph
     graph = get_graph_string(
@@ -180,6 +223,8 @@ def inject(
         python_dir=python_dir,
         format=format.value,
         column_sort=column_sort,
+        omit_comments=omit_comments,
+        layout=layout.value if layout else None,
     )
 
     comment_format = transformers[format].comment_format  # type: ignore
